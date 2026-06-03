@@ -12,7 +12,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24 # Updated to fix the deprecation warning
+          node-version: 24
           cache: 'npm'
 
       - name: Install Dependencies
@@ -26,12 +26,16 @@ jobs:
           cd ios
           pod install
           
+          # Force the React Native bundler to package code and assets for production offline usage
+          export NODE_ENV=production
+          
           # Automatically find the workspace and scheme name dynamically
           WORKSPACE_NAME=$(ls -d *.xcworkspace | head -n 1)
           SCHEME_NAME=$(basename "$WORKSPACE_NAME" .xcworkspace)
           
           echo "Building Workspace: $WORKSPACE_NAME with Scheme: $SCHEME_NAME"
           
+          # Compile the hardware-targeted release binary while stripping out remote code-signing gates
           xcodebuild -workspace "$WORKSPACE_NAME" \
                      -scheme "$SCHEME_NAME" \
                      -configuration Release \
@@ -42,8 +46,9 @@ jobs:
                      OBJROOT=$PWD/build \
                      SYMROOT=$PWD/build
                      
+          # Bundle the compiled native app layer into the Payload format required by Sideloadly
           mkdir -p Payload
-          cp -r build/Release-iphoneos/*.app Payload/
+          cp -r build/Release-iphoneos/*.app Payload/ 2>/dev/null || cp -r ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Release-iphoneos/*.app Payload/
           zip -r ../wave-unsigned.ipa Payload
 
       - name: Upload IPA Artifact
