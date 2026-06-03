@@ -1,6 +1,6 @@
 name: Build iOS IPA
 on:
-  workflow_dispatch: # Allows you to trigger the build manually with a button click
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,23 +12,36 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24 # Updated to fix the deprecation warning
           cache: 'npm'
 
       - name: Install Dependencies
         run: npm install
 
-      - name: Install Expo CLI
-        run: npm install -g expo-cli
-
       - name: Run Expo Prebuild
-        run: npx expo prebuild --platform ios
+        run: npx expo prebuild --platform ios --no-install
 
       - name: Build Unsigned IPA using CocoaPods
         run: |
           cd ios
           pod install
-          xcodebuild -workspace *.xcworkspace -scheme * -configuration Release -sdk iphoneos -allowProvisioningUpdates CODE_SIGNING_ALLOWED=NO OBJROOT=$PWD/build SYMROOT=$PWD/build
+          
+          # Automatically find the workspace and scheme name dynamically
+          WORKSPACE_NAME=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME_NAME=$(basename "$WORKSPACE_NAME" .xcworkspace)
+          
+          echo "Building Workspace: $WORKSPACE_NAME with Scheme: $SCHEME_NAME"
+          
+          xcodebuild -workspace "$WORKSPACE_NAME" \
+                     -scheme "$SCHEME_NAME" \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -allowProvisioningUpdates \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     OBJROOT=$PWD/build \
+                     SYMROOT=$PWD/build
+                     
           mkdir -p Payload
           cp -r build/Release-iphoneos/*.app Payload/
           zip -r ../wave-unsigned.ipa Payload
