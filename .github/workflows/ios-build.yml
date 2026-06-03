@@ -29,30 +29,42 @@ jobs:
       - name: Install CocoaPods
         run: |
           cd ios
-          pod deintegrate || true
+          rm -rf Pods Podfile.lock
           pod install --repo-update
 
       - name: Detect Xcode Workspace
         run: |
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/,/^$/' | tail -n +2 | head -n 1 | xargs)
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+          echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
+
+      - name: Pre-build Expo Pods
+        run: |
+          cd ios
           
-          xcodebuild -workspace "$WORKSPACE" -list
+          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/,/^$/' | tail -n +2 | head -n 1 | xargs)
+          
+          # First, build the pod frameworks needed by the app
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath DerivedData \
+            -build \
+            TARGET_PRODUCTS_DIR="$(pwd)/../DerivedData" \
+            OTHER_CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO 2>&1 | tail -50
 
       - name: Build iOS App
         run: |
           cd ios
 
           WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
-            | awk '/Schemes:/,/^$/' \
-            | tail -n +2 \
-            | head -n 1 \
-            | xargs)
-
-          echo "Building: $SCHEME"
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/,/^$/' | tail -n +2 | head -n 1 | xargs)
 
           xcodebuild \
             -workspace "$WORKSPACE" \
@@ -70,6 +82,12 @@ jobs:
           APP=$(find . \
             -path "*Release-iphoneos/*.app" \
             | head -n 1)
+
+          if [ -z "$APP" ]; then
+            APP=$(find ~/Library/Developer/Xcode/DerivedData \
+              -path "*Release-iphoneos/*.app" \
+              | head -n 1)
+          fi
 
           mkdir Payload
           cp -R "$APP" Payload/
