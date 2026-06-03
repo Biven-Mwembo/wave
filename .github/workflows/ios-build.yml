@@ -20,79 +20,76 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Clean previous iOS build
-        run: rm -rf ios android
+      - name: Clean iOS completely
+        run: |
+          rm -rf ios
+          rm -rf ~/Library/Developer/Xcode/DerivedData/wave-hbdtgtyqypfshvcwghgjisjwxgwd
 
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios --no-install
 
-      - name: Install CocoaPods
+      - name: Install CocoaPods (Fresh)
         run: |
           cd ios
-          rm -rf Pods Podfile.lock
-          pod install --repo-update
+          # Remove any stale files that could corrupt pod install
+          rm -rf Pods Podfile.lock build DerivedData
+          # Fresh, verbose pod install
+          pod install --verbose
 
-      - name: Detect Xcode Workspace
+      - name: Verify Targets
         run: |
           cd ios
           WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/,/^$/' | tail -n +2 | head -n 1 | xargs)
-          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
-          echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
-
-      - name: Pre-build Expo Pods
-        run: |
-          cd ios
           
-          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/,/^$/' | tail -n +2 | head -n 1 | xargs)
+          echo "=== Schemes ===" 
+          xcodebuild -workspace "$WORKSPACE" -list
           
-          # First, build the pod frameworks needed by the app
-          xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath DerivedData \
-            -build \
-            TARGET_PRODUCTS_DIR="$(pwd)/../DerivedData" \
-            OTHER_CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO 2>&1 | tail -50
+          echo ""
+          echo "=== Pod Targets Registered ==="
+          # Check that pods created targets
+          xcodeproj=$(find . -name "*.xcodeproj" | head -n 1)
+          ls "$xcodeproj/project.xcproject" | head -20
+          
+          # Check if ExpoModulesCore has a target
+          if grep -q "ExpoModulesCore" "$xcodeproj/project.pbxproj"; then
+            echo "✓ ExpoModulesCore target found"
+          else
+            echo "✗ ExpoModulesCore target MISSING"
+          fi
 
       - name: Build iOS App
         run: |
           cd ios
 
           WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk '/Schemes:/,/^$/' | tail -n +2 | head -n 1 | xargs)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk 'NR==3 {print $1}')
 
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
+            -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wave-hbdtgtyqypfshvcwghgjisjwxgwd \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build
+            build 2>&1 | tail -100
 
       - name: Create IPA
         run: |
           cd ios
 
-          APP=$(find . \
-            -path "*Release-iphoneos/*.app" \
-            | head -n 1)
+          APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-hbdtgtyqypfshvcwghgjisjwxgwd \
+            -path "*Release-iphoneos/*.app" | head -n 1)
 
           if [ -z "$APP" ]; then
-            APP=$(find ~/Library/Developer/Xcode/DerivedData \
-              -path "*Release-iphoneos/*.app" \
-              | head -n 1)
+            echo "ERROR: App not found"
+            exit 1
           fi
 
           mkdir Payload
           cp -R "$APP" Payload/
-
           zip -r ../wave-unsigned.ipa Payload
+          ls -la ../wave-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
