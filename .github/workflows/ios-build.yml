@@ -18,21 +18,48 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Production Unsigned IPA
-        run: |
-          # 1. Force a clean, native iOS directory structure to pull in your app.json settings
-          npx expo prebuild --platform ios --no-install
-          
-          # 2. Tell the Expo engine to compile an offline standalone release build
-          # --device generic handles the build-only pipeline without searching for local signing certificates
-          npx expo run:ios --configuration Release --device generic --no-install
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform ios --no-install
 
-      - name: Package App Bundle into Sideloadable IPA
+      - name: Force Offline Bundle and Icon Export
         run: |
-          # 3. Structure the compiled .app file into the 'Payload' format required by Sideloadly
+          # Create the resource folder inside the native project manually
+          mkdir -p ios/wave
+
+          # Explicitly force React Native to bundle your code, audio drivers, and 1024px icon into a static asset package
+          npx react-native bundle \
+            --entry-file index.js \
+            --platform ios \
+            --dev false \
+            --bundle-output ios/main.jsbundle \
+            --assets-dest ios/
+
+      - name: Build Unsigned IPA using CocoaPods
+        run: |
+          cd ios
+          pod install
+          
+          # Automatically find the workspace and scheme name dynamically
+          WORKSPACE_NAME=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME_NAME=$(basename "$WORKSPACE_NAME" .xcworkspace)
+          
+          echo "Building Workspace: $WORKSPACE_NAME with Scheme: $SCHEME_NAME"
+          
+          # Build a release file while bypassing Apple's cloud security checks
+          xcodebuild -workspace "$WORKSPACE_NAME" \
+                     -scheme "$SCHEME_NAME" \
+                     -configuration Release \
+                     -sdk iphoneos \
+                     -allowProvisioningUpdates \
+                     CODE_SIGNING_ALLOWED=NO \
+                     CODE_SIGNING_REQUIRED=NO \
+                     OBJROOT=$PWD/build \
+                     SYMROOT=$PWD/build
+                     
+          # Pack the resulting compiled structure for Sideloadly
           mkdir -p Payload
-          cp -r ios/build/Build/Products/Release-iphoneos/*.app Payload/ 2>/dev/null || cp -r ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Release-iphoneos/*.app Payload/
-          zip -r wave-unsigned.ipa Payload
+          cp -r build/Release-iphoneos/*.app Payload/ 2>/dev/null || cp -r ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Release-iphoneos/*.app Payload/
+          zip -r ../wave-unsigned.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
