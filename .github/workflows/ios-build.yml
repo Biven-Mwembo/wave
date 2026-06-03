@@ -24,8 +24,8 @@ jobs:
           npx expo prebuild --platform ios --no-install
           
           # 2. Tell the Expo engine to compile an offline standalone release build
-          # This automatically bakes the JavaScript code bundle and icon assets straight inside
-          npx expo run:ios --configuration Release --device --no-sign --no-install
+          # --device generic handles the build-only pipeline without searching for local signing certificates
+          npx expo run:ios --configuration Release --device generic --no-install
 
       - name: Package App Bundle into Sideloadable IPA
         run: |
