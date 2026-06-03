@@ -1,67 +1,82 @@
 name: Build iOS IPA
+
 on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: macos-latest
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: 'npm'
+          cache: npm
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Run Expo Prebuild
+      - name: Expo Prebuild
         run: npx expo prebuild --platform ios --no-install
 
-      - name: Force Offline Bundle and Icon Export
-        run: |
-          # Create the resource folder inside the native project manually
-          mkdir -p ios/wave
-
-          # Explicitly force React Native to bundle your code, audio drivers, and 1024px icon into a static asset package
-          npx react-native bundle \
-            --entry-file index.js \
-            --platform ios \
-            --dev false \
-            --bundle-output ios/main.jsbundle \
-            --assets-dest ios/
-
-      - name: Build Unsigned IPA using CocoaPods
+      - name: Install CocoaPods
         run: |
           cd ios
           pod install
-          
-          # Automatically find the workspace and scheme name dynamically
-          WORKSPACE_NAME=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME_NAME=$(basename "$WORKSPACE_NAME" .xcworkspace)
-          
-          echo "Building Workspace: $WORKSPACE_NAME with Scheme: $SCHEME_NAME"
-          
-          # Build a release file while bypassing Apple's cloud security checks
-          xcodebuild -workspace "$WORKSPACE_NAME" \
-                     -scheme "$SCHEME_NAME" \
-                     -configuration Release \
-                     -sdk iphoneos \
-                     -allowProvisioningUpdates \
-                     CODE_SIGNING_ALLOWED=NO \
-                     CODE_SIGNING_REQUIRED=NO \
-                     OBJROOT=$PWD/build \
-                     SYMROOT=$PWD/build
-                     
-          # Pack the resulting compiled structure for Sideloadly
-          mkdir -p Payload
-          cp -r build/Release-iphoneos/*.app Payload/ 2>/dev/null || cp -r ~/Library/Developer/Xcode/DerivedData/*/Build/Products/Release-iphoneos/*.app Payload/
+
+      - name: Detect Workspace and Scheme
+        run: |
+          cd ios
+
+          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
+
+          echo "Workspace:"
+          echo "$WORKSPACE"
+
+          xcodebuild -workspace "$WORKSPACE" -list
+
+      - name: Build iOS App
+        run: |
+          cd ios
+
+          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
+
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list \
+            | awk '/Schemes:/,/^$/' \
+            | tail -n +2 \
+            | head -n 1 \
+            | xargs)
+
+          echo "Workspace: $WORKSPACE"
+          echo "Scheme: $SCHEME"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Create IPA
+        run: |
+          cd ios
+
+          APP=$(find . \
+            -path "*Release-iphoneos/*.app" \
+            | head -n 1)
+
+          mkdir Payload
+          cp -R "$APP" Payload/
+
           zip -r ../wave-unsigned.ipa Payload
 
-      - name: Upload IPA Artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: ios-app
