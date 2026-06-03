@@ -1,0 +1,40 @@
+name: Build iOS IPA
+on:
+  workflow_dispatch: # Allows you to trigger the build manually with a button click
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Expo CLI
+        run: npm install -g expo-cli
+
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform ios
+
+      - name: Build Unsigned IPA using CocoaPods
+        run: |
+          cd ios
+          pod install
+          xcodebuild -workspace *.xcworkspace -scheme * -configuration Release -sdk iphoneos -allowProvisioningUpdates CODE_SIGNING_ALLOWED=NO OBJROOT=$PWD/build SYMROOT=$PWD/build
+          mkdir -p Payload
+          cp -r build/Release-iphoneos/*.app Payload/
+          zip -r ../wave-unsigned.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: wave-unsigned.ipa
