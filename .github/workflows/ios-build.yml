@@ -19,9 +19,10 @@ jobs:
       - name: Install Base Dependencies
         run: npm ci
 
-      - name: Inject Missing Native Audio Packages
+      - name: Install Additional Packages
         run: |
           npx expo install expo-av
+          npm install @react-native-async-storage/async-storage
 
       - name: Clean iOS Directory
         run: |
@@ -31,30 +32,19 @@ jobs:
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios --no-install
 
-      - name: Force Offline Bundle & Asset Compilation
-        run: |
-          export NODE_ENV=production
-          npx expo export:embed \
-            --platform ios \
-            --entry-file index.js \
-            --bundle-output ios/main.jsbundle \
-            --assets-dest ios/ \
-            --dev false
-
       - name: Install CocoaPods
         run: |
           cd ios
           pod install
 
-      - name: Build iOS App
+      - name: Build iOS App with Bundled JS
         run: |
           cd ios
           
           WORKSPACE="./wave.xcworkspace"
           SCHEME="wave"
           
-          echo "Using workspace: $WORKSPACE"
-          echo "Using scheme: $SCHEME"
+          echo "=== Building with workspace: $WORKSPACE, scheme: $SCHEME ==="
           
           xcodebuild \
             -workspace "$WORKSPACE" \
@@ -63,39 +53,63 @@ jobs:
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | tee build.log | tail -80
+            -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wave-build \
+            build 2>&1 | tee build.log | tail -100
           
           echo ""
-          echo "=== Check build result ==="
           if grep -q "BUILD SUCCEEDED" build.log; then
             echo "✓ BUILD SUCCEEDED"
           else
             echo "✗ BUILD FAILED"
+            tail -30 build.log
             exit 1
           fi
 
-      - name: Inject JavaScript Bundle and Create IPA
+      - name: Verify JS Bundle is in App
+        run: |
+          # Find the built app
+          APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
+          
+          echo "App location: $APP"
+          
+          if [ ! -d "$APP" ]; then
+            echo "ERROR: App not found"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=== Contents of app bundle ==="
+          ls -la "$APP"
+          
+          echo ""
+          echo "=== Checking for main.jsbundle ==="
+          if [ -f "$APP/main.jsbundle" ]; then
+            echo "✓ main.jsbundle FOUND"
+          else
+            echo "✗ main.jsbundle NOT FOUND"
+            echo "Files in app:"
+            ls -laR "$APP" | head -30
+            exit 1
+          fi
+
+      - name: Create IPA
         run: |
           cd ios
           
-          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "wave.app" -type d 2>/dev/null | head -n 1)
-          echo "Target App Path: $APP"
-
-          if [ -z "$APP" ] || [ ! -d "$APP" ]; then
-            echo "ERROR: Compiled app target not found"
+          APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
+          
+          if [ -z "$APP" ]; then
+            echo "ERROR: App not found"
             exit 1
           fi
-
-          # Force copy the compiled JS code bundle and asset folders directly inside the native app layout
-          echo "Injecting main.jsbundle and assets into $APP..."
-          cp main.jsbundle "$APP/"
-          cp -R assets "$APP/" 2>/dev/null || true
-          cp -R _expo "$APP/" 2>/dev/null || true
-
-          # Create Sideloadly compatible Payload wrapper
+          
+          echo "Creating IPA from: $APP"
+          
           mkdir Payload
           cp -R "$APP" Payload/
           zip -r ../wave-unsigned.ipa Payload
+          
+          ls -la ../wave-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
