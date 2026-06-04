@@ -1,5 +1,4 @@
 name: Build iOS IPA
-
 on:
   workflow_dispatch:
 
@@ -9,10 +8,10 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
@@ -20,42 +19,39 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Clean iOS
+      - name: Clean iOS Directory
         run: |
           rm -rf ios
-          rm -rf ~/Library/Developer/Xcode/DerivedData/wave-*
+          rm -rf ~/Library/Developer/Xcode/DerivedData/*
 
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios --no-install
+
+      - name: Force Offline Bundle & Asset Compilation
+        run: |
+          # Use Expo's native embedding command to bundle your code and 1024px icon assets directly into the native workspace
+          export NODE_ENV=production
+          npx expo export:embed \
+            --platform ios \
+            --entry-file index.js \
+            --bundle-output ios/main.jsbundle \
+            --assets-dest ios/ \
+            --dev false
 
       - name: Install CocoaPods
         run: |
           cd ios
           pod install
 
-      - name: Find Correct Workspace
-        run: |
-          cd ios
-          
-          # Find ONLY top-level xcworkspace (not inside .xcodeproj)
-          WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" -type d)
-          
-          echo "Workspace: $WORKSPACE"
-          
-          # Get scheme
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | tail -n +3 | head -1 | xargs)
-          echo "Scheme: $SCHEME"
-          
-          echo "WORKSPACE=$WORKSPACE" > build_env.sh
-          echo "SCHEME=$SCHEME" >> build_env.sh
-
       - name: Build iOS App
         run: |
           cd ios
           
-          source build_env.sh
-          echo "Workspace: $WORKSPACE"
-          echo "Scheme: $SCHEME"
+          WORKSPACE="./wave.xcworkspace"
+          SCHEME="wave"
+          
+          echo "Using workspace: $WORKSPACE"
+          echo "Using scheme: $SCHEME"
           
           xcodebuild \
             -workspace "$WORKSPACE" \
@@ -78,20 +74,18 @@ jobs:
       - name: Create IPA
         run: |
           cd ios
-
+          
           APP=$(find ~/Library/Developer/Xcode/DerivedData -name "wave.app" -type d 2>/dev/null | head -n 1)
           echo "App path: $APP"
 
           if [ -z "$APP" ] || [ ! -d "$APP" ]; then
             echo "ERROR: App not found"
-            find ~/Library/Developer/Xcode/DerivedData -name "*.app" 2>/dev/null
             exit 1
           fi
 
           mkdir Payload
           cp -R "$APP" Payload/
           zip -r ../wave-unsigned.ipa Payload
-          ls -la ../wave-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
