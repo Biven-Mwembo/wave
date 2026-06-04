@@ -35,7 +35,17 @@ jobs:
           rm -rf Pods Podfile.lock build DerivedData
           # Fresh, verbose pod install
           pod install --verbose
-
+      - name: Debug - List All Targets
+        run: |
+          cd ios
+          
+          # Find main project
+          PROJECT=$(find . -name "*.xcodeproj" | head -n 1)
+          
+          echo "=== All Native Targets in Project ==="
+          # This lists every target Xcode knows about
+          /usr/libexec/PlistBuddy -c "Print :targets" "$PROJECT/project.pbxproj" 2>/dev/null || \
+            grep -o 'targetGuid = [^;]*' "$PROJECT/project.pbxproj" | wc -l
       - name: Verify Targets
         run: |
           cd ios
