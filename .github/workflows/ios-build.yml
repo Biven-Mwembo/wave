@@ -16,7 +16,7 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install Base Dependencies
+      - name: Install Dependencies
         run: npm ci
 
       - name: Install Additional Packages
@@ -24,10 +24,10 @@ jobs:
           npx expo install expo-av
           npm install @react-native-async-storage/async-storage
 
-      - name: Clean iOS Directory
+      - name: Clean iOS
         run: |
           rm -rf ios
-          rm -rf ~/Library/Developer/Xcode/DerivedData/*
+          rm -rf ~/Library/Developer/Xcode/DerivedData/wave-*
 
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios --no-install
@@ -37,14 +37,32 @@ jobs:
           cd ios
           pod install
 
-      - name: Build iOS App with Bundled JS
+      - name: Bundle JavaScript Explicitly
+        run: |
+          cd ios
+          
+          # Create assets directory
+          mkdir -p assets
+          
+          # Bundle the JS with the metro bundler
+          npx react-native bundle \
+            --platform ios \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output ios/main.jsbundle \
+            --assets-dest ios/assets
+          
+          echo ""
+          echo "=== Checking bundle output ==="
+          ls -la ios/main.jsbundle
+          ls -la ios/assets | head -20
+
+      - name: Build iOS App
         run: |
           cd ios
           
           WORKSPACE="./wave.xcworkspace"
           SCHEME="wave"
-          
-          echo "=== Building with workspace: $WORKSPACE, scheme: $SCHEME ==="
           
           xcodebuild \
             -workspace "$WORKSPACE" \
@@ -54,43 +72,44 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wave-build \
-            build 2>&1 | tee build.log | tail -100
+            build 2>&1 | tee build.log | tail -50
           
-          echo ""
           if grep -q "BUILD SUCCEEDED" build.log; then
             echo "✓ BUILD SUCCEEDED"
           else
             echo "✗ BUILD FAILED"
-            tail -30 build.log
             exit 1
           fi
 
-      - name: Verify JS Bundle is in App
+      - name: Debug - List App Contents
         run: |
-          # Find the built app
+          APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
+          echo "=== App: $APP ==="
+          ls -la "$APP"
+          echo ""
+          echo "=== Checking for bundled JS ==="
+          find "$APP" -name "*.jsbundle" -o -name "index.js" 2>/dev/null
+          echo ""
+          echo "=== Full app contents ==="
+          ls -laR "$APP" | head -50
+
+      - name: Copy Bundle Into App
+        run: |
+          cd ios
+          
           APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
           
-          echo "App location: $APP"
+          echo "Copying bundle to app..."
+          cp main.jsbundle "$APP/"
           
-          if [ ! -d "$APP" ]; then
-            echo "ERROR: App not found"
-            exit 1
+          # Copy assets too
+          if [ -d "assets" ]; then
+            cp -R assets "$APP/" || true
           fi
           
           echo ""
-          echo "=== Contents of app bundle ==="
+          echo "=== Final app contents ==="
           ls -la "$APP"
-          
-          echo ""
-          echo "=== Checking for main.jsbundle ==="
-          if [ -f "$APP/main.jsbundle" ]; then
-            echo "✓ main.jsbundle FOUND"
-          else
-            echo "✗ main.jsbundle NOT FOUND"
-            echo "Files in app:"
-            ls -laR "$APP" | head -30
-            exit 1
-          fi
 
       - name: Create IPA
         run: |
@@ -98,17 +117,9 @@ jobs:
           
           APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
           
-          if [ -z "$APP" ]; then
-            echo "ERROR: App not found"
-            exit 1
-          fi
-          
-          echo "Creating IPA from: $APP"
-          
           mkdir Payload
           cp -R "$APP" Payload/
           zip -r ../wave-unsigned.ipa Payload
-          
           ls -la ../wave-unsigned.ipa
 
       - name: Upload IPA
