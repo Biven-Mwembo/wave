@@ -20,52 +20,18 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Clean iOS completely
+      - name: Clean iOS
         run: |
           rm -rf ios
-          rm -rf ~/Library/Developer/Xcode/DerivedData/wave-hbdtgtyqypfshvcwghgjisjwxgwd
+          rm -rf ~/Library/Developer/Xcode/DerivedData/wave-*
 
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios --no-install
 
-      - name: Install CocoaPods (Fresh)
+      - name: Install CocoaPods
         run: |
           cd ios
-          # Remove any stale files that could corrupt pod install
-          rm -rf Pods Podfile.lock build DerivedData
-          # Fresh, verbose pod install
-          pod install --verbose
-      - name: Debug - List All Targets
-        run: |
-          cd ios
-          
-          # Find main project
-          PROJECT=$(find . -name "*.xcodeproj" | head -n 1)
-          
-          echo "=== All Native Targets in Project ==="
-          # This lists every target Xcode knows about
-          /usr/libexec/PlistBuddy -c "Print :targets" "$PROJECT/project.pbxproj" 2>/dev/null || \
-            grep -o 'targetGuid = [^;]*' "$PROJECT/project.pbxproj" | wc -l
-      - name: Verify Targets
-        run: |
-          cd ios
-          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-          
-          echo "=== Schemes ===" 
-          xcodebuild -workspace "$WORKSPACE" -list
-          
-          echo ""
-          echo "=== Pod Targets Registered ==="
-          # Check that pods created targets
-          xcodeproj=$(find . -name "*.xcodeproj" | head -n 1)
-          ls "$xcodeproj/project.xcproject" | head -20
-          
-          # Check if ExpoModulesCore has a target
-          if grep -q "ExpoModulesCore" "$xcodeproj/project.pbxproj"; then
-            echo "✓ ExpoModulesCore target found"
-          else
-            echo "✗ ExpoModulesCore target MISSING"
-          fi
+          pod install
 
       - name: Build iOS App
         run: |
@@ -74,25 +40,69 @@ jobs:
           WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
           SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk 'NR==3 {print $1}')
 
+          set -o pipefail
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wave-hbdtgtyqypfshvcwghgjisjwxgwd \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | tail -100
+            build 2>&1 | tee build.log
+
+          echo ""
+          echo "=== BUILD RESULT ==="
+          if grep -q "BUILD SUCCEEDED" build.log; then
+            echo "BUILD SUCCEEDED"
+          else
+            echo "BUILD FAILED - Check build.log for errors"
+            tail -50 build.log
+            exit 1
+          fi
+
+      - name: Debug - Find App Location
+        run: |
+          echo "=== Looking for .app ==="
+          
+          # Search multiple possible locations
+          find ~/Library/Developer/Xcode/DerivedData \
+            -name "*.app" -type d 2>/dev/null | head -10
+          
+          echo ""
+          echo "=== Recent build products ==="
+          find ~/Library/Developer/Xcode/DerivedData \
+            -name "wave.app" -type d 2>/dev/null
+          
+          echo ""
+          echo "=== Any Release-iphoneos products ==="
+          find ~/Library/Developer/Xcode/DerivedData \
+            -path "*Release-iphoneos*" -name "*.app" 2>/dev/null | head -5
 
       - name: Create IPA
         run: |
           cd ios
 
-          APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-hbdtgtyqypfshvcwghgjisjwxgwd \
-            -path "*Release-iphoneos/*.app" | head -n 1)
-
+          # Try to find the app
+          APP=""
+          
+          # Search in DerivedData
+          for app in $(find ~/Library/Developer/Xcode/DerivedData -name "wave.app" -type d 2>/dev/null); do
+            if [[ "$app" == *"Release"* ]]; then
+              APP="$app"
+              break
+            fi
+          done
+          
+          # Fallback: search any Release app
           if [ -z "$APP" ]; then
-            echo "ERROR: App not found"
+            APP=$(find ~/Library/Developer/Xcode/DerivedData -path "*Release-iphoneos*" -name "*.app" -type d | head -n 1)
+          fi
+          
+          echo "Found app: $APP"
+          
+          if [ -z "$APP" ] || [ ! -d "$APP" ]; then
+            echo "ERROR: App not found in any location"
+            ls -la ~/Library/Developer/Xcode/DerivedData/
             exit 1
           fi
 
