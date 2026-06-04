@@ -37,21 +37,21 @@ jobs:
           cd ios
           pod install
 
-      - name: Bundle JavaScript using Expo
+      - name: Bundle JavaScript
         run: |
-          cd ios
+          # Run from project root, output to ios folder
+          mkdir -p ios/assets
           
-          # Use expo to export the bundle
           npx expo export:embed \
             --platform ios \
-            --entry-file ../index.js \
+            --entry-file index.js \
             --bundle-output ios/main.jsbundle \
             --assets-dest ios/assets \
             --dev false 2>&1
           
           echo ""
-          echo "=== Bundle file ==="
-          ls -la ios/main.jsbundle || echo "No bundle file found"
+          echo "=== Bundle output ==="
+          ls -la ios/main.jsbundle || echo "Bundle not found"
 
       - name: Build iOS App
         run: |
