@@ -24,6 +24,10 @@ jobs:
           npx expo install expo-av
           npm install @react-native-async-storage/async-storage
 
+      - name: Install RN CLI (Required for bundling)
+        run: |
+          npm install @react-native-community/cli --save-dev
+
       - name: Clean iOS
         run: |
           rm -rf ios
@@ -37,25 +41,21 @@ jobs:
           cd ios
           pod install
 
-      - name: Bundle JavaScript Explicitly
+      - name: Bundle JavaScript
         run: |
           cd ios
           
-          # Create assets directory
           mkdir -p assets
           
-          # Bundle the JS with the metro bundler
           npx react-native bundle \
             --platform ios \
             --dev false \
-            --entry-file index.js \
+            --entry-file ../index.js \
             --bundle-output ios/main.jsbundle \
-            --assets-dest ios/assets
+            --assets-dest ios/assets 2>&1
           
           echo ""
-          echo "=== Checking bundle output ==="
           ls -la ios/main.jsbundle
-          ls -la ios/assets | head -20
 
       - name: Build iOS App
         run: |
@@ -72,7 +72,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             -derivedDataPath ~/Library/Developer/Xcode/DerivedData/wave-build \
-            build 2>&1 | tee build.log | tail -50
+            build 2>&1 | tee build.log | tail -30
           
           if grep -q "BUILD SUCCEEDED" build.log; then
             echo "✓ BUILD SUCCEEDED"
@@ -81,34 +81,19 @@ jobs:
             exit 1
           fi
 
-      - name: Debug - List App Contents
-        run: |
-          APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
-          echo "=== App: $APP ==="
-          ls -la "$APP"
-          echo ""
-          echo "=== Checking for bundled JS ==="
-          find "$APP" -name "*.jsbundle" -o -name "index.js" 2>/dev/null
-          echo ""
-          echo "=== Full app contents ==="
-          ls -laR "$APP" | head -50
-
-      - name: Copy Bundle Into App
+      - name: Copy Bundle and Assets to App
         run: |
           cd ios
           
           APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
           
-          echo "Copying bundle to app..."
           cp main.jsbundle "$APP/"
           
-          # Copy assets too
           if [ -d "assets" ]; then
             cp -R assets "$APP/" || true
           fi
           
-          echo ""
-          echo "=== Final app contents ==="
+          echo "=== App Contents ==="
           ls -la "$APP"
 
       - name: Create IPA
