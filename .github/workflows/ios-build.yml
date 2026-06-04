@@ -33,79 +33,53 @@ jobs:
           cd ios
           pod install
 
+      - name: Detect Workspace and Scheme
+        run: |
+          cd ios
+          
+          WORKSPACE=$(find . -name "*.xcworkspace" -type d | head -n 1)
+          echo "Workspace: $WORKSPACE"
+          
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>&1 | tail -n +3 | head -n 1)
+          SCHEME=$(echo "$SCHEME" | xargs)
+          echo "Scheme: $SCHEME"
+          
+          # Save to file for next step
+          echo "WORKSPACE_PATH=$WORKSPACE" > build_env.txt
+          echo "SCHEME_NAME=$SCHEME" >> build_env.txt
+          cat build_env.txt
+
       - name: Build iOS App
         run: |
           cd ios
-
-          WORKSPACE=$(find . -name "*.xcworkspace" | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list | awk 'NR==3 {print $1}')
-
-          set -o pipefail
+          
+          source build_env.txt
+          echo "Workspace: $WORKSPACE_PATH"
+          echo "Scheme: $SCHEME_NAME"
+          
           xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
+            -workspace "$WORKSPACE_PATH" \
+            -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | tee build.log
-
-          echo ""
-          echo "=== BUILD RESULT ==="
-          if grep -q "BUILD SUCCEEDED" build.log; then
-            echo "BUILD SUCCEEDED"
-          else
-            echo "BUILD FAILED - Check build.log for errors"
-            tail -50 build.log
-            exit 1
-          fi
-
-      - name: Debug - Find App Location
-        run: |
-          echo "=== Looking for .app ==="
-          
-          # Search multiple possible locations
-          find ~/Library/Developer/Xcode/DerivedData \
-            -name "*.app" -type d 2>/dev/null | head -10
-          
-          echo ""
-          echo "=== Recent build products ==="
-          find ~/Library/Developer/Xcode/DerivedData \
-            -name "wave.app" -type d 2>/dev/null
-          
-          echo ""
-          echo "=== Any Release-iphoneos products ==="
-          find ~/Library/Developer/Xcode/DerivedData \
-            -path "*Release-iphoneos*" -name "*.app" 2>/dev/null | head -5
+            build 2>&1 | tail -50
 
       - name: Create IPA
         run: |
           cd ios
 
-          # Try to find the app
-          APP=""
-          
-          # Search in DerivedData
-          for app in $(find ~/Library/Developer/Xcode/DerivedData -name "wave.app" -type d 2>/dev/null); do
-            if [[ "$app" == *"Release"* ]]; then
-              APP="$app"
-              break
-            fi
-          done
-          
-          # Fallback: search any Release app
-          if [ -z "$APP" ]; then
-            APP=$(find ~/Library/Developer/Xcode/DerivedData -path "*Release-iphoneos*" -name "*.app" -type d | head -n 1)
-          fi
-          
-          echo "Found app: $APP"
-          
+          APP=$(find ~/Library/Developer/Xcode/DerivedData \
+            -path "*Release-iphoneos*" -name "wave.app" -type d 2>/dev/null | head -n 1)
+
           if [ -z "$APP" ] || [ ! -d "$APP" ]; then
-            echo "ERROR: App not found in any location"
-            ls -la ~/Library/Developer/Xcode/DerivedData/
+            echo "ERROR: App not found"
+            find ~/Library/Developer/Xcode/DerivedData -name "*.app" 2>/dev/null | head -5
             exit 1
           fi
 
+          echo "Found app at: $APP"
           mkdir Payload
           cp -R "$APP" Payload/
           zip -r ../wave-unsigned.ipa Payload
