@@ -16,8 +16,13 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Install Dependencies
+      - name: Install Base Dependencies
         run: npm ci
+
+      - name: Inject Missing Native Audio Packages
+        run: |
+          # Force install expo-av directly into the cloud pipeline runner to unblock the audio engine
+          npx expo install expo-av
 
       - name: Clean iOS Directory
         run: |
@@ -29,7 +34,6 @@ jobs:
 
       - name: Force Offline Bundle & Asset Compilation
         run: |
-          # Use Expo's native embedding command to bundle your code and 1024px icon assets directly into the native workspace
           export NODE_ENV=production
           npx expo export:embed \
             --platform ios \
