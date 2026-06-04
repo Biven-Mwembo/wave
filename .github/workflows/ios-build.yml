@@ -24,10 +24,6 @@ jobs:
           npx expo install expo-av
           npm install @react-native-async-storage/async-storage
 
-      - name: Install RN CLI (Required for bundling)
-        run: |
-          npm install @react-native-community/cli --save-dev
-
       - name: Clean iOS
         run: |
           rm -rf ios
@@ -41,21 +37,21 @@ jobs:
           cd ios
           pod install
 
-      - name: Bundle JavaScript
+      - name: Bundle JavaScript using Expo
         run: |
           cd ios
           
-          mkdir -p assets
-          
-          npx react-native bundle \
+          # Use expo to export the bundle
+          npx expo export:embed \
             --platform ios \
-            --dev false \
             --entry-file ../index.js \
             --bundle-output ios/main.jsbundle \
-            --assets-dest ios/assets 2>&1
+            --assets-dest ios/assets \
+            --dev false 2>&1
           
           echo ""
-          ls -la ios/main.jsbundle
+          echo "=== Bundle file ==="
+          ls -la ios/main.jsbundle || echo "No bundle file found"
 
       - name: Build iOS App
         run: |
@@ -81,13 +77,15 @@ jobs:
             exit 1
           fi
 
-      - name: Copy Bundle and Assets to App
+      - name: Copy Bundle to App
         run: |
           cd ios
           
           APP=$(find ~/Library/Developer/Xcode/DerivedData/wave-build -name "wave.app" -type d | head -n 1)
           
-          cp main.jsbundle "$APP/"
+          if [ -f "main.jsbundle" ]; then
+            cp main.jsbundle "$APP/"
+          fi
           
           if [ -d "assets" ]; then
             cp -R assets "$APP/" || true
