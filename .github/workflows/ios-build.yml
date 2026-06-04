@@ -21,7 +21,6 @@ jobs:
 
       - name: Inject Missing Native Audio Packages
         run: |
-          # Force install expo-av directly into the cloud pipeline runner to unblock the audio engine
           npx expo install expo-av
 
       - name: Clean iOS Directory
@@ -75,18 +74,25 @@ jobs:
             exit 1
           fi
 
-      - name: Create IPA
+      - name: Inject JavaScript Bundle and Create IPA
         run: |
           cd ios
           
           APP=$(find ~/Library/Developer/Xcode/DerivedData -name "wave.app" -type d 2>/dev/null | head -n 1)
-          echo "App path: $APP"
+          echo "Target App Path: $APP"
 
           if [ -z "$APP" ] || [ ! -d "$APP" ]; then
-            echo "ERROR: App not found"
+            echo "ERROR: Compiled app target not found"
             exit 1
           fi
 
+          # Force copy the compiled JS code bundle and asset folders directly inside the native app layout
+          echo "Injecting main.jsbundle and assets into $APP..."
+          cp main.jsbundle "$APP/"
+          cp -R assets "$APP/" 2>/dev/null || true
+          cp -R _expo "$APP/" 2>/dev/null || true
+
+          # Create Sideloadly compatible Payload wrapper
           mkdir Payload
           cp -R "$APP" Payload/
           zip -r ../wave-unsigned.ipa Payload
