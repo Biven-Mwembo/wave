@@ -33,53 +33,81 @@ jobs:
           cd ios
           pod install
 
-      - name: Detect Workspace and Scheme
+      - name: Debug Workspace Structure
         run: |
           cd ios
           
-          WORKSPACE=$(find . -name "*.xcworkspace" -type d | head -n 1)
+          echo "=== Files in ios/ ==="
+          ls -la
+          
+          echo ""
+          echo "=== Finding workspace ==="
+          WORKSPACE=$(find . -name "*.xcworkspace" -type d)
           echo "Workspace: $WORKSPACE"
           
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>&1 | tail -n +3 | head -n 1)
-          SCHEME=$(echo "$SCHEME" | xargs)
-          echo "Scheme: $SCHEME"
+          echo ""
+          echo "=== Listing schemes ==="
+          xcodebuild -workspace "$WORKSPACE" -list
           
-          # Save to file for next step
-          echo "WORKSPACE_PATH=$WORKSPACE" > build_env.txt
-          echo "SCHEME_NAME=$SCHEME" >> build_env.txt
-          cat build_env.txt
+          echo ""
+          echo "=== Direct structure ==="
+          find . -maxdepth 2 -type d
 
       - name: Build iOS App
         run: |
           cd ios
           
-          source build_env.txt
-          echo "Workspace: $WORKSPACE_PATH"
-          echo "Scheme: $SCHEME_NAME"
+          WORKSPACE=$(find . -name "*.xcworkspace" -type d | head -n 1)
+          
+          # Get scheme more reliably
+          SCHEME_LIST=$(xcodebuild -workspace "$WORKSPACE" -list 2>&1)
+          SCHEME=$(echo "$SCHEME_LIST" | grep "^    " | head -1 | xargs)
+          
+          echo "Using workspace: $WORKSPACE"
+          echo "Using scheme: '$SCHEME'"
+          
+          # Verify scheme is not empty
+          if [ -z "$SCHEME" ]; then
+            echo "ERROR: Scheme is empty!"
+            echo "Full scheme list:"
+            echo "$SCHEME_LIST"
+            exit 1
+          fi
           
           xcodebuild \
-            -workspace "$WORKSPACE_PATH" \
-            -scheme "$SCHEME_NAME" \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            build 2>&1 | tail -50
+            build 2>&1 | tee build.log | tail -80
+          
+          echo ""
+          echo "=== Check build result ==="
+          if grep -q "BUILD SUCCEEDED" build.log; then
+            echo "✓ BUILD SUCCEEDED"
+          else
+            echo "✗ BUILD FAILED"
+            exit 1
+          fi
 
       - name: Create IPA
         run: |
           cd ios
 
-          APP=$(find ~/Library/Developer/Xcode/DerivedData \
-            -path "*Release-iphoneos*" -name "wave.app" -type d 2>/dev/null | head -n 1)
+          echo "=== Looking for app ==="
+          find ~/Library/Developer/Xcode/DerivedData -name "*.app" 2>/dev/null
+          
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "wave.app" -type d 2>/dev/null | head -n 1)
+          
+          echo "App path: $APP"
 
           if [ -z "$APP" ] || [ ! -d "$APP" ]; then
             echo "ERROR: App not found"
-            find ~/Library/Developer/Xcode/DerivedData -name "*.app" 2>/dev/null | head -5
             exit 1
           fi
 
-          echo "Found app at: $APP"
           mkdir Payload
           cp -R "$APP" Payload/
           zip -r ../wave-unsigned.ipa Payload
